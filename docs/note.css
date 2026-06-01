@@ -2,14 +2,19 @@
   padding: 2rem 0 3rem;
 }
 
+.note-page .container,
+.note-header .container {
+  width: min(calc(100% - 1.5rem), 1320px);
+}
+
 .note-nav-shell {
   grid-template-columns: auto 1fr auto auto;
 }
 
 .note-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
-  gap: 1.25rem;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 1rem;
   align-items: start;
 }
 
@@ -84,7 +89,7 @@
 }
 
 .note-article {
-  padding: 1.8rem;
+  padding: 1.9rem 2.2rem;
 }
 
 .note-meta {
@@ -98,6 +103,7 @@
   padding-top: 1.5rem;
   color: var(--text-soft);
   overflow-wrap: anywhere;
+  font-size: 1.02rem;
 }
 
 .note-content > :first-child {
@@ -135,6 +141,12 @@
   margin: 0 0 1rem;
 }
 
+.note-content p,
+.note-content li,
+.note-content blockquote {
+  max-width: 82ch;
+}
+
 .note-content ul,
 .note-content ol {
   padding-left: 1.4rem;
@@ -160,15 +172,17 @@
 
 .note-content pre {
   margin: 1.1rem 0 1.35rem;
-  padding: 1rem 1.1rem;
+  padding: 1.1rem 1.2rem;
   overflow-x: auto;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 16px;
-  background: rgba(2, 6, 23, 0.76);
+  background: #1e1e1e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 body[data-theme="light"] .note-content pre {
-  background: #e9eef7;
+  background: #1e1e1e;
+  border-color: rgba(15, 23, 42, 0.18);
 }
 
 .note-content code,
@@ -180,14 +194,64 @@ body[data-theme="light"] .note-content pre {
   padding: 0.16rem 0.42rem;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-soft);
-  color: var(--text);
+  background: rgba(79, 209, 197, 0.08);
+  color: #7dd3fc;
   font-size: 0.92em;
 }
 
 .note-content pre code {
-  color: #dbeafe;
+  display: block;
+  color: #d4d4d4;
   font-size: 0.92rem;
+  line-height: 1.7;
+  tab-size: 2;
+  -moz-tab-size: 2;
+}
+
+.note-content pre .hljs-comment,
+.note-content pre .hljs-quote {
+  color: #6a9955;
+}
+
+.note-content pre .hljs-keyword,
+.note-content pre .hljs-selector-tag,
+.note-content pre .hljs-literal,
+.note-content pre .hljs-section,
+.note-content pre .hljs-link {
+  color: #569cd6;
+}
+
+.note-content pre .hljs-string,
+.note-content pre .hljs-title,
+.note-content pre .hljs-name,
+.note-content pre .hljs-type,
+.note-content pre .hljs-attribute,
+.note-content pre .hljs-symbol,
+.note-content pre .hljs-bullet,
+.note-content pre .hljs-addition {
+  color: #ce9178;
+}
+
+.note-content pre .hljs-number,
+.note-content pre .hljs-meta,
+.note-content pre .hljs-built_in,
+.note-content pre .hljs-builtin-name,
+.note-content pre .hljs-params {
+  color: #b5cea8;
+}
+
+.note-content pre .hljs-variable,
+.note-content pre .hljs-template-variable,
+.note-content pre .hljs-selector-id,
+.note-content pre .hljs-selector-class,
+.note-content pre .hljs-regexp,
+.note-content pre .hljs-deletion {
+  color: #9cdcfe;
+}
+
+.note-content pre .hljs-function,
+.note-content pre .hljs-title.function_ {
+  color: #dcdcaa;
 }
 
 .note-content table {

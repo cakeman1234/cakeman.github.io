@@ -10,6 +10,7 @@ const notePath = document.getElementById("note-path");
 const noteContent = document.getElementById("note-content");
 const tocNav = document.getElementById("toc-nav");
 const header = document.querySelector(".site-header");
+const embeddedMarkdown = document.getElementById("embedded-markdown");
 
 function setTheme(theme) {
   if (theme === "light") {
@@ -143,10 +144,62 @@ function renderMath() {
   });
 }
 
+function highlightCodeBlocks() {
+  if (typeof hljs === "undefined") {
+    return;
+  }
+
+  noteContent.querySelectorAll("pre code").forEach((block) => {
+    hljs.highlightElement(block);
+  });
+}
+
+function renderMarkdown(markdown, path) {
+  const normalizedMarkdown = markdown.trim().length > 0
+    ? preprocessMarkdown(markdown)
+    : "# Empty note\n\nThis markdown file exists, but it does not contain content yet.";
+
+  if (typeof marked?.parse !== "function") {
+    noteContent.innerHTML = "";
+    const fallback = document.createElement("pre");
+    fallback.textContent = normalizedMarkdown;
+    noteContent.appendChild(fallback);
+    noteTitle.textContent = path.split("/").pop();
+    noteHeading.textContent = "Markdown preview unavailable";
+    document.title = `${noteTitle.textContent} | Note Viewer`;
+    return;
+  }
+
+  noteContent.innerHTML = marked.parse(normalizedMarkdown, {
+    gfm: true,
+    breaks: false
+  });
+
+  const usedSlugs = new Set();
+  const headings = Array.from(noteContent.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+  headings.forEach((heading) => {
+    heading.id = slugify(heading.textContent, usedSlugs);
+  });
+
+  const firstHeading = headings[0]?.textContent || path.split("/").pop().replace(".md", "");
+  noteTitle.textContent = firstHeading;
+  noteHeading.textContent = firstHeading;
+  document.title = `${firstHeading} | Note Viewer`;
+
+  highlightCodeBlocks();
+  renderMath();
+  buildToc();
+}
+
 async function loadNote() {
   const params = new URLSearchParams(window.location.search);
-  const path = sanitizeNotePath(params.get("path"));
+  const path = sanitizeNotePath(body.dataset.notePath || params.get("path"));
   notePath.textContent = path;
+
+  if (embeddedMarkdown) {
+    renderMarkdown(embeddedMarkdown.textContent, path);
+    return;
+  }
 
   try {
     const response = await fetch(path, { cache: "no-store" });
@@ -155,43 +208,14 @@ async function loadNote() {
     }
 
     const rawMarkdown = await response.text();
-    const markdown = rawMarkdown.trim().length > 0
-      ? preprocessMarkdown(rawMarkdown)
-      : "# Empty note\n\nThis markdown file exists, but it does not contain content yet.";
-
-    if (typeof marked?.parse !== "function") {
-      noteContent.innerHTML = "";
-      const fallback = document.createElement("pre");
-      fallback.textContent = markdown;
-      noteContent.appendChild(fallback);
-      noteTitle.textContent = path.split("/").pop();
-      noteHeading.textContent = "Markdown preview unavailable";
-      document.title = `${noteTitle.textContent} | Note Viewer`;
-      return;
-    }
-
-    noteContent.innerHTML = marked.parse(markdown, {
-      gfm: true,
-      breaks: false
-    });
-
-    const usedSlugs = new Set();
-    const headings = Array.from(noteContent.querySelectorAll("h1, h2, h3, h4, h5, h6"));
-    headings.forEach((heading) => {
-      heading.id = slugify(heading.textContent, usedSlugs);
-    });
-
-    const firstHeading = headings[0]?.textContent || path.split("/").pop().replace(".md", "");
-    noteTitle.textContent = firstHeading;
-    noteHeading.textContent = firstHeading;
-    document.title = `${firstHeading} | Note Viewer`;
-
-    renderMath();
-    buildToc();
+    renderMarkdown(rawMarkdown, path);
   } catch (error) {
     noteTitle.textContent = "Unable to load note";
     noteHeading.textContent = "Unable to load note";
-    noteContent.innerHTML = `<p class="note-error">${error.message}</p>`;
+    const detail = window.location.protocol === "file:"
+      ? `${error.message}. Local file previews cannot fetch Markdown. Open a note page with embedded content or run a local web server.`
+      : error.message;
+    noteContent.innerHTML = `<p class="note-error">${detail}</p>`;
     tocNav.innerHTML = '<p class="toc-empty">No table of contents available.</p>';
   }
 }
