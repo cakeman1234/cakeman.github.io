@@ -1,0 +1,400 @@
+﻿# PPO
+
+PPO（Proximal Policy Optimization）是目前最常见的策略优化方法之一。它并不试图彻底改变策略梯度的基本形式，而是在保留策略梯度主干的前提下，对“单次更新幅度”做了显式约束。理解 PPO 时，单独记住 clipped objective 远远不够，更重要的是看清一条完整链条：策略如何采样动作、critic 如何提供训练信号、advantage 如何构造、旧策略概率如何被冻结，以及这些量如何共同进入最终的优化目标。
+
+本文围绕一个最简离散动作 PPO 实现展开，重点说明公式、代码和训练流程之间的对应关系。
+
+## PPO 要解决的问题
+
+普通策略梯度方法直接沿着“提高高回报动作概率、降低低回报动作概率”的方向更新策略。这种更新方式虽然正确，但往往缺少对更新步长的显式控制：如果某次梯度更新过大，新策略可能迅速偏离旧策略，导致训练分布突变，进而引发性能震荡甚至崩溃。
+
+PPO 的核心思想可以概括为：
+
+> 允许策略更新，但限制单次更新不能偏离旧策略过远。
+
+因此，PPO 关注的并不只是“某个动作是否值得鼓励”，还关注“新策略相对旧策略究竟改了多少”。这一点决定了 PPO 的核心对象不是单纯的回报，而是新旧策略在同一状态、同一动作上的概率比值。
+
+## PPO 中的核心量
+
+### 策略函数
+
+策略网络表示为：
+
+\[
+\pi_\theta(a \mid s)
+\]
+
+它描述在状态 \(s\) 下选择动作 \(a\) 的概率。在离散动作环境中，策略网络通常输出一个概率分布，例如 `[0.2, 0.8]`，表示两个动作分别被选中的概率。
+
+### 状态价值函数
+
+价值网络表示为：
+
+\[
+V_\phi(s)
+\]
+
+它估计从状态 \(s\) 出发，在当前策略下未来期望获得的折扣累计回报。`critic` 的职责不是直接选动作，而是为 actor 提供训练信号，尤其是在构造 TD target 和 advantage 时起核心作用。
+
+### 新旧策略概率比
+
+PPO 中最关键的量之一是：
+
+\[
+r_t(\theta)=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\theta_{old}}(a_t\mid s_t)}
+\]
+
+它衡量新策略相对旧策略，对同一个动作 \(a_t\) 的偏好变化幅度。
+
+- \(r_t(\theta) > 1\)：新策略更倾向于该动作
+- \(r_t(\theta) < 1\)：新策略更不倾向于该动作
+
+PPO 要控制的正是这个比值的变化范围。
+
+### Advantage
+
+优势函数记作：
+
+\[
+\hat A_t
+\]
+
+它衡量动作 \(a_t\) 在状态 \(s_t\) 下相对于基线的相对好坏。
+
+- \(\hat A_t > 0\)：该动作优于基线，应提高概率
+- \(\hat A_t < 0\)：该动作劣于基线，应降低概率
+
+在工程实现中，\(\hat A_t\) 往往不是直接由整段回报得到，而是由 TD 误差进一步通过 GAE（Generalized Advantage Estimation）构造，这样通常更稳定。
+
+## PPO 的 Clipped Objective
+
+PPO 的标志性目标函数是：
+
+\[
+L^{clip}(\theta)=\mathbb{E}\left[\min\left(r_t(\theta)\hat A_t,\ \text{clip}(r_t(\theta),1-\epsilon,1+\epsilon)\hat A_t\right)\right]
+\]
+
+### clip 的作用
+
+如果没有 `clip`，优化目标会直接按 \(r_t(\theta)\hat A_t\) 推动策略更新。当新策略相对于旧策略变化过大时，这一目标仍可能继续增大，从而鼓励一次性的大步更新。`clip` 的作用就是将 \(r_t(\theta)\) 截断在 \([1-\epsilon, 1+\epsilon]\) 区间内，使过大的更新不再继续获得额外收益。
+
+### 为什么要取 `min`
+
+`clip` 之后仍要与未截断目标取 `min`：
+
+\[
+\min\left(r_t\hat A_t,\ \text{clip}(r_t,1-\epsilon,1+\epsilon)\hat A_t\right)
+\]
+
+其含义是：一旦某次更新已经超出安全范围，就采用更保守的目标值。对于正 advantage，它避免过度提高好动作的概率；对于负 advantage，它避免过度压低坏动作的概率。PPO 不是禁止策略改变，而是在目标函数层面抑制“过激改变”。
+
+### 为什么代码里的 actor loss 往往带负号
+
+论文通常把 PPO 目标写成最大化问题：
+
+\[
+\max_\theta L^{clip}(\theta)
+\]
+
+而深度学习框架中的优化器通常以最小化 loss 为默认形式，因此实现中常写为：
+
+```python
+actor_loss = -torch.mean(torch.min(surr1, surr2))
+```
+
+这只是把“最大化目标”改写成“最小化其相反数”：
+
+\[
+\max f(\theta) \equiv \min -f(\theta)
+\]
+
+负号本身不改变 PPO 的优化方向，只是为了适配优化器接口。
+
+## 从代码实现看 PPO 的完整链条
+
+下面按照实际训练流程展开说明：
+
+`take_action`
+→ actor / critic 网络
+→ `td_target`
+→ `td_delta`
+→ `advantage / GAE`
+→ `old_log_probs`
+→ `ratio`
+→ clipped surrogate objective
+→ critic loss
+→ 多轮更新
+
+### 1. `take_action`：按当前策略采样动作
+
+```python
+def task_action(self, state):
+    state = torch.tensor([state], dtype=torch.float).to(self.device)
+    probs = self.actor(state)
+    action_dist = torch.distributions.Categorical(probs)
+    action = action_dist.sample()
+    return action.item()
+```
+
+这段代码的功能是根据当前状态从策略分布中采样动作。其数学对应关系是：
+
+\[
+a_t \sim \pi_\theta(\cdot \mid s_t)
+\]
+
+这里的 `self.actor(state)` 输出的是策略函数 \(\pi_\theta(\cdot \mid s_t)\)，`Categorical(probs)` 将其视为离散分布，`sample()` 则从中随机采样动作。
+
+这一步对应的是“用当前策略与环境交互”，而不是 clipped objective 本身。PPO 的 clip 机制发生在后续更新阶段，而不是采样阶段。
+
+训练时使用 `sample()` 的原因是需要保持随机策略，从而保证探索。如果直接使用 `argmax`，策略会过早退化为贪心选择，小概率动作几乎没有机会被尝试。需要注意的是，随机采样只能提供基础探索；如果实现中没有额外的 entropy bonus，当某些动作的概率被压得很低时，探索通常仍然偏弱。
+
+### 2. actor / critic 网络：分别表示 \(\pi_\theta\) 和 \(V_\phi\)
+
+```python
+class PolicyNet(nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super(PolicyNet, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, action_dim)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        return F.softmax(self.fc2(x), dim=1)
+```
+
+`PolicyNet` 对应策略函数 \(\pi_\theta(a \mid s)\)。
+
+- `state_dim` 是状态向量维度
+- `hidden_dim` 是隐藏层宽度
+- `action_dim` 是动作空间大小
+
+`ReLU` 用于引入非线性，`softmax` 用于将最后一层输出转成合法的离散动作概率分布。
+
+```python
+class ValueNet(nn.Module):
+    def __init__(self, state_dim, hidden_dim):
+        super(ValueNet, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
+```
+
+`ValueNet` 对应状态价值函数 \(V_\phi(s)\)。它输出的是一个标量，而不是概率，因此最后一层不需要 `softmax`。
+
+一个常见误解是：critic 在前向时是否需要“倒序展开未来奖励”。答案是否定的。critic 前向本身只是直接学习一个映射 \(s \mapsto V(s)\)。真正经常需要倒序递推的是 return 或 GAE advantage 的计算，而不是 `critic(states)` 这一步。
+
+### 3. `td_target`：一步 TD 目标
+
+```python
+td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+```
+
+这段代码构造的是一步 TD target：
+
+\[
+\text{td\_target}_t = r_t + \gamma V_\phi(s_{t+1}) (1-d_t)
+\]
+
+其中 \(d_t\) 表示终止标记。若当前步终止，则不再引入下一状态价值；若未终止，则使用 bootstrap 估计未来回报。
+
+`td_target` 的作用是为 critic 提供监督信号。它不是完整回报的显式展开，而是当前奖励加上下一个状态价值的组合。
+
+### 4. `td_delta`：TD 误差
+
+```python
+td_delta = td_target - self.critic(states)
+```
+
+对应公式：
+
+\[
+\delta_t = r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)
+\]
+
+它衡量当前 critic 对状态价值的估计偏差。`td_delta` 同时服务于两个目的：
+
+- 作为 critic 学习是否准确的直接信号
+- 作为进一步构造 advantage 的基础量
+
+### 5. `advantage / GAE`：由 TD 误差构造优势函数
+
+```python
+advantage = rl_utils.compute_advantage(
+    self.gamma, self.lmbda, td_delta.cpu()
+).to(self.device)
+```
+
+这一步通常在实现 GAE。典型形式是：
+
+\[
+\hat A_t = \delta_t + (\gamma\lambda)\delta_{t+1} + (\gamma\lambda)^2\delta_{t+2} + \cdots
+\]
+
+GAE 的作用是在偏差与方差之间做折中，使 advantage 比直接使用整段回报更稳定。很多实现会在 `compute_advantage` 内部采用倒序循环，原因正是这一递推形式天然适合从后往前计算。
+
+### 6. `old_log_probs`：冻结旧策略下的动作概率
+
+```python
+old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
+```
+
+这里有两个关键点。
+
+第一，`gather(1, actions)` 不是在取“所有动作的概率”，而是在每个状态对应的一行中，只取实际执行动作 \(a_t\) 的概率，即：
+
+\[
+\pi_{\theta_{old}}(a_t \mid s_t)
+\]
+
+第二，`detach()` 必须保留。PPO 需要将旧策略概率固定为一个参照物，否则在后续多轮更新中，分母会跟着新策略一起变化，`ratio` 就不再表示“新策略相对旧策略的变化幅度”。
+
+### 7. `ratio`：新旧策略概率比
+
+```python
+log_porbs = torch.log(self.actor(states).gather(1, actions))
+ratio = torch.exp(log_porbs - old_log_probs)
+```
+
+对应公式：
+
+\[
+r_t(\theta)=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\theta_{old}}(a_t\mid s_t)}
+\]
+
+之所以可以通过 `exp(log_probs - old_log_probs)` 得到，是因为：
+
+\[
+\exp(\log a - \log b) = \frac{a}{b}
+\]
+
+这一步是 PPO 的核心连接点：前面所有采样、价值估计、advantage 构造，最终都要落到 `ratio` 与 `advantage` 的组合上。
+
+### 8. clipped surrogate objective：actor 的优化目标
+
+```python
+surr1 = ratio * advantage
+surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
+actor_loss = torch.mean(-torch.min(surr1, surr2))
+```
+
+这三行代码正对应 PPO 的 clipped objective。
+
+- `surr1` 是未截断的策略目标 \(r_t \hat A_t\)
+- `surr2` 是将 `ratio` 限制在 \([1-\epsilon, 1+\epsilon]\) 后得到的保守目标
+- `torch.min(surr1, surr2)` 对应数学式中的 `min`
+- 最前面的负号是因为实现采用最小化 loss 的接口
+
+这一步在 PPO 整体训练流程中的位置非常明确：actor 不直接对回报回归，而是通过 `ratio × advantage` 的形式，提升好动作概率、压低坏动作概率，并利用 clip 保证更新幅度受控。
+
+### 9. critic loss：拟合状态价值
+
+```python
+critic_loss = torch.mean(
+    F.mse_loss(self.critic(states), td_target.detach())
+)
+```
+
+critic 的目标是让 \(V_\phi(s_t)\) 尽量逼近前面构造出的 `td_target`，因此最常见的损失形式是均方误差：
+
+\[
+L_V(\phi) = \mathbb{E}\left[(V_\phi(s_t) - \text{td\_target}_t)^2\right]
+\]
+
+这里通常使用 MSE，是因为 value learning 本质上是一个回归问题。需要注意的是，`F.mse_loss` 默认就常常已经进行了 reduction，外层再包一层 `torch.mean` 往往是多余的，但不影响算法原理。
+
+### 10. 多轮更新：为什么同一批样本可以重复优化
+
+```python
+for _ in range(self.epochs):
+    log_porbs = torch.log(self.actor(states).gather(1, actions))
+    ratio = torch.exp(log_porbs - old_log_probs)
+    surr1 = ratio * advantage
+    surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
+
+    actor_loss = torch.mean(-torch.min(surr1, surr2))
+    critic_loss = torch.mean(F.mse_loss(self.critic(states), td_target.detach()))
+    self.actor_optimizer.zero_grad()
+    self.critic_optimizer.zero_grad()
+    actor_loss.backward()
+    critic_loss.backward()
+    self.actor_optimizer.step()
+    self.critic_optimizer.step()
+```
+
+PPO 的一个重要特点是：同一批采样数据可以在固定旧策略参照的前提下更新多轮。这并不违背 on-policy 的设定，因为这些样本确实来自旧策略，而后续多轮更新始终围绕同一个 `old_log_probs` 进行约束。真正被禁止的是“脱离当前采样策略太远的无约束复用”，而不是“在约束条件下对当前策略样本做有限次优化”。
+
+## 数值例子：clip 为什么会取更保守的目标
+
+设某个样本满足：
+
+- 旧策略概率为 0.2
+- 新策略概率为 0.3
+- \(\hat A_t = 2\)
+- \(\epsilon = 0.2\)
+
+则：
+
+\[
+r_t = 0.3 / 0.2 = 1.5
+\]
+
+未截断目标为：
+
+\[
+surr1 = 1.5 \times 2 = 3.0
+\]
+
+截断后：
+
+\[
+\text{clip}(1.5, 0.8, 1.2) = 1.2
+\]
+
+因此：
+
+\[
+surr2 = 1.2 \times 2 = 2.4
+\]
+
+最终 PPO 取：
+
+\[
+\min(3.0, 2.4) = 2.4
+\]
+
+这说明该动作确实值得鼓励，因为 advantage 为正，但新策略把该动作概率从 0.2 提高到 0.3 的幅度已经偏大，PPO 会主动采用更保守的目标，防止进一步鼓励过激更新。
+
+## 常见实现细节与坑点
+
+### 离散动作与连续动作的区别
+
+当前实现使用 `softmax` 输出动作概率，并通过 `Categorical` 采样，因此适用于离散动作环境，例如 CartPole。连续动作环境下，策略网络通常需要输出高斯分布的均值和方差，而不是离散概率。
+
+### `softmax` 后再 `log` 的数值稳定性一般
+
+最简实现中常见写法是先输出概率，再对选中动作概率取对数。这种写法易懂，但数值稳定性通常不如直接输出 logits，再交给分布对象处理。工程实现中，后者更常见。
+
+### `F.mse_loss` 的 reduction
+
+如果已经使用默认 reduction，外层再写 `torch.mean(F.mse_loss(...))` 往往是冗余的。这不影响原理，但会让代码显得不够干净。
+
+### 没有 entropy bonus 时探索通常偏弱
+
+仅靠 `sample()` 的随机性无法保证小概率动作会被充分探索。若策略较早塌缩到尖锐分布，后续探索能力会明显下降。许多 PPO 实现会加入 entropy regularization 作为补充。
+
+### 变量名拼写错误不会影响算法，但会影响可读性
+
+例如 `task_action` 与 `take_action`、`log_porbs` 与 `log_probs` 这类拼写问题不会改变 PPO 数学结构，但会增加理解成本，尤其是在把代码与公式对应起来时更容易造成混淆。
+
+## 总结
+
+PPO 的稳定性并不来自单独某一个公式，而是来自整套机制的协同工作：随机策略采样提供数据，critic 估计状态价值，TD target 与 GAE 构造 advantage，`old_log_probs` 固定旧策略参照，`ratio` 衡量新旧策略变化，clipped objective 约束 actor 更新幅度，多轮更新则在这一约束下提高样本利用率。
+
+因此，理解 PPO 的关键不只是记住 clipped objective，而是能够把如下链条顺畅地连接起来：
+
+`take_action -> td_target -> advantage -> old_log_probs -> ratio -> clip loss`
+
+当这条链条在代码中能够逐步对应到各自的数学对象时，PPO 的训练逻辑才算真正清晰。
