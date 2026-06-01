@@ -155,6 +155,12 @@
   max-width: none;
 }
 
+.note-content p,
+.note-content li {
+  text-align: justify;
+  text-justify: inter-ideograph;
+}
+
 .note-content ul,
 .note-content ol {
   padding-left: 1.4rem;
@@ -291,6 +297,7 @@ body[data-theme="light"] .note-content pre {
 .note-content .katex-display {
   margin: 1.25rem 0;
   display: block;
+  width: 100%;
   text-align: center;
   overflow-x: auto;
   overflow-y: hidden;
@@ -299,7 +306,18 @@ body[data-theme="light"] .note-content pre {
 .note-content p > .katex-display,
 .note-content li > .katex-display {
   display: block;
+  width: 100%;
   text-align: center;
+}
+
+.note-content .katex {
+  font-size: 1.08em;
+}
+
+.note-content .katex-display > .katex {
+  display: inline-block;
+  margin: 0 auto;
+  font-size: 1.18em;
 }
 
 .note-error {
