@@ -75,9 +75,29 @@ function slugify(text, usedSlugs) {
 }
 
 function preprocessMarkdown(markdown) {
+  const blockMathPattern = /\\\[\s*([\s\S]*?)\s*\\\]/g;
+
+  function isSimpleInlineMath(content) {
+    const normalized = content
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (normalized.length === 0 || normalized.length > 24) {
+      return false;
+    }
+
+    return !/[=+\-/*<>]/.test(normalized) &&
+      !/\\frac|\\dfrac|\\cfrac|\\sum|\\prod|\\int|\\min|\\max|\\mathbb|\\left|\\right/.test(normalized);
+  }
+
   return markdown
-    .replace(/\\\[/g, "$$")
-    .replace(/\\\]/g, "$$")
+    .replace(blockMathPattern, (_, content) => {
+      const normalized = content.replace(/\s+/g, " ").trim();
+      if (isSimpleInlineMath(normalized)) {
+        return `<span class="inline-math-strong">\\(${normalized}\\)</span>`;
+      }
+      return `$$\n${content.trim()}\n$$`;
+    })
     .replace(/\\\(/g, "$")
     .replace(/\\\)/g, "$");
 }
