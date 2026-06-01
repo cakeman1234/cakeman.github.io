@@ -430,10 +430,6 @@ PPO 更新里大量计算都默认张量是二维列向量，例如 `[batch_size
 
 仅靠 `sample()` 的随机性无法保证小概率动作会被充分探索。若策略较早塌缩到尖锐分布，后续探索能力会明显下降。许多 PPO 实现会加入 entropy regularization 作为补充。
 
-### 变量名拼写错误不影响原理，但会影响可读性
-
-例如 `task_action` 与 `take_action`、`log_porbs` 与 `log_probs` 这类拼写问题不会改变 PPO 数学结构，但会增加理解成本，尤其是在把代码与公式对应起来时更容易造成混淆。
-
 ## 总结
 
 PPO 的稳定性并不来自单独某一个公式，而是来自整套机制的协同工作：随机策略采样提供数据，critic 估计状态价值，TD target 与 GAE 构造 advantage，`old_log_probs` 固定旧策略参照，`ratio` 衡量新旧策略变化，clipped objective 约束 actor 更新幅度，entropy bonus 维持探索，多轮更新则在这一约束下提高样本利用率。
