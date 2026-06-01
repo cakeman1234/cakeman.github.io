@@ -122,13 +122,14 @@ actor_loss = -torch.mean(torch.min(surr1, surr2))
 → `old_log_probs`
 → `ratio`
 → clipped surrogate objective
+→ entropy bonus
 → critic loss
 → 多轮更新
 
 ### 1. `take_action`：按当前策略采样动作
 
 ```python
-def task_action(self, state):
+def take_action(self, state):
     state = torch.tensor([state], dtype=torch.float).to(self.device)
     probs = self.actor(state)
     action_dist = torch.distributions.Categorical(probs)
@@ -186,7 +187,33 @@ class ValueNet(nn.Module):
 
 一个常见误解是：critic 在前向时是否需要“倒序展开未来奖励”。答案是否定的。critic 前向本身只是直接学习一个映射 \(s \mapsto V(s)\)。真正经常需要倒序递推的是 return 或 GAE advantage 的计算，而不是 `critic(states)` 这一步。
 
-### 3. `td_target`：一步 TD 目标
+### 3. 将轨迹整理成批量张量
+
+```python
+states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
+actions = torch.tensor(transition_dict['actions']).view(-1, 1).to(self.device)
+rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
+next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
+dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
+```
+
+这一步的作用是把采样得到的一批轨迹整理成统一形状的张量，供后续批量计算使用。
+
+其中 `view(-1, 1)` 的作用是把原本形如 `[batch_size]` 的一维向量重排成 `[batch_size, 1]` 的列向量。这里的 `-1` 表示这一维由 PyTorch 自动推断，`1` 表示第二维固定为 1。
+
+例如：
+
+- `actions = [0, 1, 0, 1]`
+- `actions.view(-1, 1)` 之后变成 `[[0], [1], [0], [1]]`
+
+这样做主要有两个目的：
+
+- 方便与 `critic(states)` 这样的输出形状 `[batch_size, 1]` 对齐
+- 方便 `gather(1, actions)` 按“每一行取一个动作”的方式索引
+
+如果这里不整理成列向量，后续广播和索引维度都更容易出错。
+
+### 4. `td_target`：一步 TD 目标
 
 ```python
 td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
@@ -202,7 +229,7 @@ td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
 
 `td_target` 的作用是为 critic 提供监督信号。它不是完整回报的显式展开，而是当前奖励加上下一个状态价值的组合。
 
-### 4. `td_delta`：TD 误差
+### 5. `td_delta`：TD 误差
 
 ```python
 td_delta = td_target - self.critic(states)
@@ -219,7 +246,7 @@ td_delta = td_target - self.critic(states)
 - 作为 critic 学习是否准确的直接信号
 - 作为进一步构造 advantage 的基础量
 
-### 5. `advantage / GAE`：由 TD 误差构造优势函数
+### 6. `advantage / GAE`：由 TD 误差构造优势函数
 
 ```python
 advantage = rl_utils.compute_advantage(
@@ -235,7 +262,7 @@ advantage = rl_utils.compute_advantage(
 
 GAE 的作用是在偏差与方差之间做折中，使 advantage 比直接使用整段回报更稳定。很多实现会在 `compute_advantage` 内部采用倒序循环，原因正是这一递推形式天然适合从后往前计算。
 
-### 6. `old_log_probs`：冻结旧策略下的动作概率
+### 7. `old_log_probs`：冻结旧策略下的动作概率
 
 ```python
 old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
@@ -251,11 +278,11 @@ old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
 
 第二，`detach()` 必须保留。PPO 需要将旧策略概率固定为一个参照物，否则在后续多轮更新中，分母会跟着新策略一起变化，`ratio` 就不再表示“新策略相对旧策略的变化幅度”。
 
-### 7. `ratio`：新旧策略概率比
+### 8. `ratio`：新旧策略概率比
 
 ```python
-log_porbs = torch.log(self.actor(states).gather(1, actions))
-ratio = torch.exp(log_porbs - old_log_probs)
+log_probs = torch.log(probs.gather(1, actions))
+ratio = torch.exp(log_probs - old_log_probs)
 ```
 
 对应公式：
@@ -272,29 +299,54 @@ r_t(\theta)=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\theta_{old}}(a_t\mid s_t)}
 
 这一步是 PPO 的核心连接点：前面所有采样、价值估计、advantage 构造，最终都要落到 `ratio` 与 `advantage` 的组合上。
 
-### 8. clipped surrogate objective：actor 的优化目标
+### 9. clipped surrogate objective：actor 的优化目标
 
 ```python
 surr1 = ratio * advantage
 surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
-actor_loss = torch.mean(-torch.min(surr1, surr2))
 ```
 
-这三行代码正对应 PPO 的 clipped objective。
+这两行代码对应 PPO 的 clipped objective 中的两个 surrogate：
 
 - `surr1` 是未截断的策略目标 \(r_t \hat A_t\)
 - `surr2` 是将 `ratio` 限制在 \([1-\epsilon, 1+\epsilon]\) 后得到的保守目标
+
+随后 actor loss 写成：
+
+```python
+actor_loss = torch.mean(-torch.min(surr1, surr2) - self.entropy_coef * entropy)
+```
+
+其中：
+
 - `torch.min(surr1, surr2)` 对应数学式中的 `min`
 - 最前面的负号是因为实现采用最小化 loss 的接口
+- `- self.entropy_coef * entropy` 是熵奖励项，用于鼓励策略保持更高的不确定性，避免过早塌缩为过于尖锐的分布
 
 这一步在 PPO 整体训练流程中的位置非常明确：actor 不直接对回报回归，而是通过 `ratio × advantage` 的形式，提升好动作概率、压低坏动作概率，并利用 clip 保证更新幅度受控。
 
-### 9. critic loss：拟合状态价值
+### 10. entropy bonus：为什么能增强探索
 
 ```python
-critic_loss = torch.mean(
-    F.mse_loss(self.critic(states), td_target.detach())
-)
+probs = self.actor(states)
+dist = torch.distributions.Categorical(probs)
+entropy = dist.entropy().view(-1, 1)
+```
+
+这里计算的是当前策略分布的熵：
+
+\[
+H(\pi_\theta(\cdot|s)) = -\sum_a \pi_\theta(a|s) \log \pi_\theta(a|s)
+\]
+
+熵越大，说明动作分布越平缓，策略越不确定；熵越小，说明策略越尖锐，越容易只偏向少数动作。将熵项加入 actor loss，本质上是在鼓励策略不要太早把某些动作概率压到接近 0，从而保留更多探索空间。
+
+熵奖励不会直接指定“应该探索哪个动作”，它影响探索的方式是维持分布的宽度，让小概率动作不至于过早消失。
+
+### 11. critic loss：拟合状态价值
+
+```python
+critic_loss = F.mse_loss(self.critic(states), td_target.detach())
 ```
 
 critic 的目标是让 \(V_\phi(s_t)\) 尽量逼近前面构造出的 `td_target`，因此最常见的损失形式是均方误差：
@@ -303,19 +355,24 @@ critic 的目标是让 \(V_\phi(s_t)\) 尽量逼近前面构造出的 `td_target
 L_V(\phi) = \mathbb{E}\left[(V_\phi(s_t) - \text{td\_target}_t)^2\right]
 \]
 
-这里通常使用 MSE，是因为 value learning 本质上是一个回归问题。需要注意的是，`F.mse_loss` 默认就常常已经进行了 reduction，外层再包一层 `torch.mean` 往往是多余的，但不影响算法原理。
+这里通常使用 MSE，是因为 value learning 本质上是一个回归问题。
 
-### 10. 多轮更新：为什么同一批样本可以重复优化
+### 12. 多轮更新：为什么同一批样本可以重复优化
 
 ```python
 for _ in range(self.epochs):
-    log_porbs = torch.log(self.actor(states).gather(1, actions))
-    ratio = torch.exp(log_porbs - old_log_probs)
+    probs = self.actor(states)
+    dist = torch.distributions.Categorical(probs)
+    entropy = dist.entropy().view(-1, 1)
+
+    log_probs = torch.log(probs.gather(1, actions))
+    ratio = torch.exp(log_probs - old_log_probs)
+
     surr1 = ratio * advantage
     surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
 
-    actor_loss = torch.mean(-torch.min(surr1, surr2))
-    critic_loss = torch.mean(F.mse_loss(self.critic(states), td_target.detach()))
+    actor_loss = torch.mean(-torch.min(surr1, surr2) - self.entropy_coef * entropy)
+    critic_loss = F.mse_loss(self.critic(states), td_target.detach())
     self.actor_optimizer.zero_grad()
     self.critic_optimizer.zero_grad()
     actor_loss.backward()
@@ -377,21 +434,21 @@ surr2 = 1.2 \times 2 = 2.4
 
 最简实现中常见写法是先输出概率，再对选中动作概率取对数。这种写法易懂，但数值稳定性通常不如直接输出 logits，再交给分布对象处理。工程实现中，后者更常见。
 
-### `F.mse_loss` 的 reduction
+### `view(-1, 1)` 的本质是做形状对齐
 
-如果已经使用默认 reduction，外层再写 `torch.mean(F.mse_loss(...))` 往往是冗余的。这不影响原理，但会让代码显得不够干净。
+PPO 更新里大量计算都默认张量是二维列向量，例如 `[batch_size, 1]`。将 `actions`、`rewards`、`dones` 等一维数组用 `view(-1, 1)` 转成列向量，可以避免广播错误，也让 `gather` 和 MSE 计算更自然。
 
 ### 没有 entropy bonus 时探索通常偏弱
 
 仅靠 `sample()` 的随机性无法保证小概率动作会被充分探索。若策略较早塌缩到尖锐分布，后续探索能力会明显下降。许多 PPO 实现会加入 entropy regularization 作为补充。
 
-### 变量名拼写错误不会影响算法，但会影响可读性
+### 变量名拼写错误不影响原理，但会影响可读性
 
 例如 `task_action` 与 `take_action`、`log_porbs` 与 `log_probs` 这类拼写问题不会改变 PPO 数学结构，但会增加理解成本，尤其是在把代码与公式对应起来时更容易造成混淆。
 
 ## 总结
 
-PPO 的稳定性并不来自单独某一个公式，而是来自整套机制的协同工作：随机策略采样提供数据，critic 估计状态价值，TD target 与 GAE 构造 advantage，`old_log_probs` 固定旧策略参照，`ratio` 衡量新旧策略变化，clipped objective 约束 actor 更新幅度，多轮更新则在这一约束下提高样本利用率。
+PPO 的稳定性并不来自单独某一个公式，而是来自整套机制的协同工作：随机策略采样提供数据，critic 估计状态价值，TD target 与 GAE 构造 advantage，`old_log_probs` 固定旧策略参照，`ratio` 衡量新旧策略变化，clipped objective 约束 actor 更新幅度，entropy bonus 维持探索，多轮更新则在这一约束下提高样本利用率。
 
 因此，理解 PPO 的关键不只是记住 clipped objective，而是能够把如下链条顺畅地连接起来：
 
