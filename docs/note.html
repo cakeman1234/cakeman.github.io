@@ -14,14 +14,14 @@
     href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
     rel="stylesheet"
   >
-  <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="note.css">
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
   >
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="note.css">
 </head>
-<body>
+<body data-note-section="rl">
   <a class="skip-link" href="#note-content">Skip to note content</a>
 
   <header class="site-header note-header">
@@ -36,16 +36,27 @@
 
       <a class="nav-home" href="index.html">Home</a>
 
-      <button
-        class="menu-toggle toc-toggle"
-        type="button"
-        aria-expanded="false"
-        aria-controls="note-sidebar"
-        aria-label="Toggle table of contents"
-      >
-        <span></span>
-        <span></span>
-      </button>
+      <div class="note-header-actions">
+        <button
+          class="panel-toggle notes-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="notes-sidebar"
+          aria-label="Toggle note navigation"
+        >
+          Notes
+        </button>
+
+        <button
+          class="panel-toggle toc-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="toc-sidebar"
+          aria-label="Toggle table of contents"
+        >
+          Contents
+        </button>
+      </div>
 
       <button class="theme-toggle" type="button" aria-label="Toggle color theme">
         <span class="theme-toggle-icon" aria-hidden="true"></span>
@@ -56,13 +67,12 @@
 
   <main class="note-page">
     <div class="container note-layout">
-      <aside class="note-sidebar" id="note-sidebar" aria-label="Table of contents">
-        <div class="surface-card sidebar-card">
-          <p class="eyebrow">Contents</p>
-          <h1 class="sidebar-title" id="note-title">Loading note...</h1>
-          <p class="sidebar-path" id="note-path"></p>
-          <nav class="toc-nav" id="toc-nav">
-            <p class="toc-empty">The table of contents will appear here.</p>
+      <aside class="notes-sidebar" id="notes-sidebar" aria-label="Note navigation">
+        <div class="surface-card sidebar-card notes-card">
+          <p class="eyebrow">Notes</p>
+          <h2 class="sidebar-title sidebar-section-title">Reinforcement Learning</h2>
+          <nav class="notes-nav" id="notes-nav">
+            <p class="toc-empty">The note list will appear here.</p>
           </nav>
         </div>
       </aside>
@@ -76,6 +86,17 @@
           <div class="note-content" id="note-content" aria-live="polite"></div>
         </article>
       </section>
+
+      <aside class="toc-sidebar" id="toc-sidebar" aria-label="Table of contents">
+        <div class="surface-card sidebar-card toc-card">
+          <p class="eyebrow">Contents</p>
+          <h2 class="sidebar-title" id="note-title">Loading note...</h2>
+          <p class="sidebar-path" id="note-path"></p>
+          <nav class="toc-nav" id="toc-nav">
+            <p class="toc-empty">The table of contents will appear here.</p>
+          </nav>
+        </div>
+      </aside>
     </div>
   </main>
 
@@ -93,6 +114,10 @@
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/javascript.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/typescript.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/xml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/css.min.js"></script>
   <script src="note.js"></script>
 </body>
 </html>

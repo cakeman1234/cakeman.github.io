@@ -10,12 +10,6 @@
 - 为什么在 `token_loss` 计算一次 `mean`，在最后 `forward` 还要计算一次 `mean`？
 - 这两次 `mean` 在公式上是怎么对应的？
 
-## 2026-06-02
-
-### 站点与笔记展示
-- Notes 页正文为什么看起来没有真正变宽，为什么代码块边界和正文边界不一致？
-- 为什么本地直接打开 `note.html?path=rl/ppo.md` 会 `Failed to fetch`？
-- 如何简化个人站点的小改动发布流程，避免每次都手动 `add / commit / push`？
 
 ### GRPO 设计与实现
 - 按照 `GRPOLoss` 的职责，它内部是否需要计算 advantage？

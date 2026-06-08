@@ -47,13 +47,15 @@ class GRPOLoss(nn.Module):
                 advantages: torch.Tensor, 
                 ref_logprobs: List[torch.Tensor]) -> torch.Tensor:
         all_loss = []
+
+        if len(new_logprobs) != len(old_logprobs) or len(new_logprobs) != len(ref_logprobs):
+                raise ValueError(...)
+        if len(advantages) != len(new_logprobs):
+            raise ValueError(...)
         
         # 遍历组内的每个回答
         for i in range(len(new_logprobs)):
-            if len(new_logprobs) != len(old_logprobs) or len(new_logprobs) != len(ref_logprobs):
-                raise ValueError(...)
-            if len(advantages) != len(new_logprobs):
-                raise ValueError(...)
+            
             
             new_lp = new_logprobs[i].reshape(-1)
             old_lp = old_logprobs[i].reshape(-1)
@@ -103,14 +105,24 @@ class GRPOTrainer():
         self.adv_eps = adv_eps
 
     def compute_advantages(self, rewards: List[float]) -> torch.Tensor:
-        rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
+        rewards_tensor = torch.tensor(rewards, dtype=torch.float32, device=self.device)
 
-        if len(rewards_tensor) == 1:
-            return torch.zeros_like(rewards_tensor)
-        
-        mean_reward = rewards_tensor.mean()
-        std_reward = rewards_tensor.std(unbiased=False)
-        advantages = (rewards_tensor - mean_reward) / (std_reward + self.adv_eps)
+        if len(rewards_tensor) == 0:
+            raise ValueError("rewards cannot be empty.")
+
+        if len(rewards_tensor) % self.group_size != 0:
+            raise ValueError(
+                f"Number of rewards ({len(rewards_tensor)}) must be divisible by group_size ({self.group_size})."
+            )
+
+        grouped_rewards = rewards_tensor.view(-1, self.group_size)  # shape: (num_groups, group_size)
+
+        group_mean = grouped_rewards.mean(dim=1, keepdim=True)      # shape: (num_groups, 1)
+        group_std = grouped_rewards.std(dim=1, unbiased=False, keepdim=True)  # shape: (num_groups, 1)
+
+        grouped_advantages = (grouped_rewards - group_mean) / (group_std + self.adv_eps)
+        advantages = grouped_advantages.reshape(-1)  # shape: (num_groups * group_size,)
+
         return advantages
     
     def compute_logprobs(self, model, trajectories: List[Trajectory]) :
@@ -129,6 +141,11 @@ class GRPOTrainer():
             # 抽取generated token的log_probs
             token_logprobs = []
             for pos in traj.generated_positions:
+                if (pos == 0):
+                    raise ValueError(
+                        f"position can not be zero"
+                    )
+                
                 token_id = input_ids[0, pos]    # 这个位置上的真实token
                 token_lp = log_probs[pos - 1, token_id]  # 第 pos-1 个位置的 logits / log_probs，用来预测第 pos 个 token
                 token_logprobs.append(token_lp)
@@ -137,3 +154,32 @@ class GRPOTrainer():
             all_logprobs.append(token_logprobs)
         
         return all_logprobs
+    
+    def update_step(self, trajectories: List[Trajectory], old_logprobs: List[torch.Tensor]) -> torch.Tensor:
+        if len(trajectories) == 0:
+            raise ValueError("trajectories cannot be empty.")
+         
+        if len(old_logprobs) != len(trajectories):
+            raise ValueError(
+                f"old_logprobs batch size ({len(old_logprobs)}) must match trajectories batch size ({len(trajectories)})."
+            )
+
+        # 设置模型模式
+        self.policy_model.train()
+        self.ref_model.eval()
+
+        rewards = [traj.reward for traj in trajectories]
+        advantages = self.compute_advantages(rewards)
+
+        new_logprobs = self.compute_logprobs(self.policy_model, trajectories)
+        
+        with torch.no_grad():
+            ref_logprobs = self.compute_logprobs(self.ref_model, trajectories)
+
+        loss = self.loss_fn(new_logprobs, old_logprobs, advantages, ref_logprobs)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss

@@ -482,18 +482,6 @@ loss = self.loss_fn(new_logprobs, old_logprobs, advantages, ref_logprobs)
 
 即使 reference model 初始参数来自旧模型或当前模型的拷贝，它在训练逻辑上也应是一个单独对象。因为它承担的是“稳定参考分布”的角色，而不是参与当前这轮参数更新。
 
-### 面试手写时需要写到什么程度
-
-如果只是面试里的核心实现，通常只要把下面几层写清楚就足够了：
-
-- `Trajectory`
-- `compute_advantages`
-- `compute_logprobs`
-- `GRPOLoss`
-- `update_step`
-
-完整的 response generation 系统可以作为上游模块说明，但不一定需要全部展开。
-
 ## 总结
 
 GRPO 的重点并不在于引入了一个完全不同的优化器，而是在 PPO 风格的受限更新框架上，把训练信号从“critic 估计 advantage”转成了“组内 reward 相对差异”，并进一步用 reference KL 约束策略漂移。

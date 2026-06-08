@@ -2,15 +2,29 @@ const storageKey = "site-theme";
 const body = document.body;
 const themeToggle = document.querySelector(".theme-toggle");
 const themeToggleText = document.querySelector(".theme-toggle-text");
+const notesToggle = document.querySelector(".notes-toggle");
 const tocToggle = document.querySelector(".toc-toggle");
-const noteSidebar = document.getElementById("note-sidebar");
+const notesSidebar = document.getElementById("notes-sidebar");
+const tocSidebar = document.getElementById("toc-sidebar");
 const noteTitle = document.getElementById("note-title");
 const noteHeading = document.getElementById("note-heading");
 const notePath = document.getElementById("note-path");
 const noteContent = document.getElementById("note-content");
 const tocNav = document.getElementById("toc-nav");
+const notesNav = document.getElementById("notes-nav");
 const header = document.querySelector(".site-header");
 const embeddedMarkdown = document.getElementById("embedded-markdown");
+
+const NOTE_COLLECTIONS = {
+  rl: {
+    title: "Reinforcement Learning",
+    items: [
+      { slug: "ppo", title: "PPO", path: "rl/ppo.md" },
+      { slug: "grpo", title: "GRPO", path: "rl/grpo.md" },
+      { slug: "concepts", title: "RL Concepts", path: "rl/concepts.md" }
+    ]
+  }
+};
 
 function setTheme(theme) {
   if (theme === "light") {
@@ -35,10 +49,21 @@ function updateHeaderState() {
   header.classList.toggle("is-scrolled", window.scrollY > 16);
 }
 
-function toggleSidebar(forceClose = false) {
-  const shouldOpen = forceClose ? false : !noteSidebar.classList.contains("is-open");
-  noteSidebar.classList.toggle("is-open", shouldOpen);
-  tocToggle.setAttribute("aria-expanded", String(shouldOpen));
+function togglePanel(panel, toggle, forceClose = false) {
+  if (!panel || !toggle) {
+    return;
+  }
+
+  const shouldOpen = forceClose ? false : !panel.classList.contains("is-open");
+  panel.classList.toggle("is-open", shouldOpen);
+  toggle.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function closePanelsOnDesktop() {
+  if (window.innerWidth > 1100) {
+    togglePanel(notesSidebar, notesToggle, true);
+    togglePanel(tocSidebar, tocToggle, true);
+  }
 }
 
 function sanitizeNotePath(rawPath) {
@@ -75,7 +100,9 @@ function slugify(text, usedSlugs) {
 }
 
 function preprocessMarkdown(markdown) {
-  const blockMathPattern = /\\\[\s*([\s\S]*?)\s*\\\]/g;
+  const blockMathPattern = /\\\[\s*([\s\S]*?)\s*\\\]|\$\$\s*([\s\S]*?)\s*\$\$/g;
+  const codeBlocks = [];
+  const mathBlocks = [];
 
   function isSimpleInlineMath(content) {
     const normalized = content
@@ -90,20 +117,141 @@ function preprocessMarkdown(markdown) {
       !/\\frac|\\dfrac|\\cfrac|\\sum|\\prod|\\int|\\min|\\max|\\mathbb|\\left|\\right/.test(normalized);
   }
 
-  return markdown
-    .replace(blockMathPattern, (_, content) => {
+  function storeCodeBlock(match) {
+    const token = `@@CODEBLOCK_${codeBlocks.length}@@`;
+    codeBlocks.push(match);
+    return token;
+  }
+
+  let processedMarkdown = markdown
+    .replace(/```[\s\S]*?```/g, storeCodeBlock)
+    .replace(/~~~[\s\S]*?~~~/g, storeCodeBlock);
+
+  processedMarkdown = processedMarkdown
+    .replace(blockMathPattern, (_, bracketContent, dollarContent) => {
+      const content = (bracketContent ?? dollarContent ?? "").trim();
       const normalized = content.replace(/\s+/g, " ").trim();
       if (isSimpleInlineMath(normalized)) {
-        return `<span class="inline-math-strong">\\(${normalized}\\)</span>`;
+        return `<span class="inline-math-strong">\\(${escapeHtml(normalized)}\\)</span>`;
       }
-      return `$$\n${content.trim()}\n$$`;
+      const token = `@@MATHBLOCK_${mathBlocks.length}@@`;
+      mathBlocks.push(content);
+      return `\n\n${token}\n\n`;
     })
     .replace(/\\\(/g, "$")
     .replace(/\\\)/g, "$");
+
+  codeBlocks.forEach((content, index) => {
+    processedMarkdown = processedMarkdown.replace(`@@CODEBLOCK_${index}@@`, content);
+  });
+
+  return {
+    markdown: processedMarkdown,
+    mathBlocks
+  };
+}
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function stripHeadingPrefix(text) {
+  return text.replace(/^\s*\d+(?:\.\d+)*[\.\)]?\s+/, "").trim();
+}
+
+function getCurrentCollection() {
+  const key = body.dataset.noteSection || "rl";
+  return NOTE_COLLECTIONS[key] || NOTE_COLLECTIONS.rl;
+}
+
+function resolveNoteHref(item) {
+  const normalizedPath = window.location.pathname.replace(/\\/g, "/");
+  const isRlStandalone = /\/rl\/[^/]+\.html$/i.test(normalizedPath);
+  return isRlStandalone ? `${item.slug}.html` : `rl/${item.slug}.html`;
+}
+
+function resolveMarkdownFetchPath(path) {
+  const normalizedPath = window.location.pathname.replace(/\\/g, "/");
+  const isRlStandalone = /\/rl\/[^/]+\.html$/i.test(normalizedPath);
+  return isRlStandalone && path.startsWith("rl/") ? `../${path}` : path;
+}
+
+function buildNotesNav(activePath) {
+  const collection = getCurrentCollection();
+
+  if (!notesNav) {
+    return;
+  }
+
+  notesNav.innerHTML = "";
+
+  collection.items.forEach((item) => {
+    const link = document.createElement("a");
+    link.className = "note-link";
+    link.href = resolveNoteHref(item);
+    link.classList.toggle("is-active", item.path === activePath);
+
+    const title = document.createElement("span");
+    title.className = "note-link-title";
+    title.textContent = item.title;
+
+    const meta = document.createElement("span");
+    meta.className = "note-link-meta";
+    meta.textContent = item.path.replace("rl/", "");
+
+    link.append(title, meta);
+    notesNav.appendChild(link);
+  });
+}
+
+function getOutlineHeadings() {
+  const preferred = Array.from(noteContent.querySelectorAll("h2, h3, h4"));
+  if (preferred.length > 0) {
+    return preferred;
+  }
+  return Array.from(noteContent.querySelectorAll("h1, h2, h3"));
+}
+
+function applyHeadingNumbering() {
+  const headings = getOutlineHeadings();
+  const counters = [0, 0, 0];
+
+  headings.forEach((heading) => {
+    const level = Number(heading.tagName.replace("H", ""));
+    const normalizedLevel = Math.max(2, Math.min(level, 4));
+    const depth = normalizedLevel - 2;
+
+    counters[depth] += 1;
+    for (let index = depth + 1; index < counters.length; index += 1) {
+      counters[index] = 0;
+    }
+
+    const numberLabel = counters.slice(0, depth + 1).filter(Boolean).join(".");
+    const titleText = heading.dataset.headingText || heading.textContent.trim();
+
+    heading.dataset.headingText = titleText;
+    heading.dataset.headingNumber = numberLabel;
+    heading.innerHTML = "";
+
+    const number = document.createElement("span");
+    number.className = "heading-number";
+    number.textContent = `${numberLabel}`;
+
+    const text = document.createElement("span");
+    text.className = "heading-text";
+    text.textContent = titleText;
+
+    heading.append(number, text);
+  });
 }
 
 function buildToc() {
-  const headings = Array.from(noteContent.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+  const headings = getOutlineHeadings();
 
   if (headings.length === 0) {
     tocNav.innerHTML = '<p class="toc-empty">No headings found in this note.</p>';
@@ -115,14 +263,30 @@ function buildToc() {
   headings.forEach((heading) => {
     const link = document.createElement("a");
     const level = Number(heading.tagName.replace("H", ""));
-    link.className = `toc-link level-${level}`;
+    const visibleLevel = Math.max(2, Math.min(level, 4));
+    const label = heading.dataset.headingText || heading.textContent.trim();
+
+    link.className = `toc-link level-${visibleLevel}`;
     link.href = `#${heading.id}`;
-    link.textContent = heading.textContent;
+
+    if (heading.dataset.headingNumber) {
+      const number = document.createElement("span");
+      number.className = "toc-number";
+      number.textContent = heading.dataset.headingNumber;
+      link.appendChild(number);
+    }
+
+    const text = document.createElement("span");
+    text.className = "toc-text";
+    text.textContent = label;
+    link.appendChild(text);
+
     link.addEventListener("click", () => {
-      if (window.innerWidth <= 960) {
-        toggleSidebar(true);
+      if (window.innerWidth <= 1100) {
+        togglePanel(tocSidebar, tocToggle, true);
       }
     });
+
     tocNav.appendChild(link);
   });
 
@@ -158,9 +322,26 @@ function renderMath() {
   renderMathInElement(noteContent, {
     delimiters: [
       { left: "$$", right: "$$", display: true },
+      { left: "\\[", right: "\\]", display: true },
+      { left: "\\(", right: "\\)", display: false },
       { left: "$", right: "$", display: false }
     ],
+    ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
     throwOnError: false
+  });
+
+  normalizeDisplayMath();
+}
+
+function normalizeDisplayMath() {
+  noteContent.querySelectorAll(".katex-display").forEach((displayMath) => {
+    const parent = displayMath.parentElement;
+    if (!parent) {
+      return;
+    }
+
+    parent.classList.add("math-block");
+    parent.classList.add("math-block-display");
   });
 }
 
@@ -170,19 +351,72 @@ function highlightCodeBlocks() {
   }
 
   noteContent.querySelectorAll("pre code").forEach((block) => {
+    block.classList.add("hljs");
     hljs.highlightElement(block);
+    enhanceCodeHighlight(block);
+  });
+}
+
+function enhanceCodeHighlight(block) {
+  const languageClass = Array.from(block.classList)
+    .find((className) => className.startsWith("language-"));
+  const language = languageClass?.replace("language-", "");
+
+  if (!["python", "py"].includes(language)) {
+    return;
+  }
+
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const parentClass = node.parentElement?.className || "";
+    if (!/hljs-(keyword|string|comment|number|literal|built_in|title|function|class|meta|attr|params)/.test(parentClass)) {
+      textNodes.push(node);
+    }
+  }
+
+  textNodes.forEach((node) => {
+    const fragment = document.createDocumentFragment();
+    const parts = node.textContent.split(/(\b(?:self|cls)\b|\b[a-zA-Z_]\w*(?=\s*=)|(?<=\.)[a-zA-Z_]\w*)/g);
+
+    parts.forEach((part) => {
+      if (!part) {
+        return;
+      }
+
+      if (/^(self|cls)$/.test(part)) {
+        const span = document.createElement("span");
+        span.className = "hljs-variable language-self";
+        span.textContent = part;
+        fragment.appendChild(span);
+      } else if (/^[a-zA-Z_]\w*$/.test(part)) {
+        const span = document.createElement("span");
+        span.className = "hljs-variable";
+        span.textContent = part;
+        fragment.appendChild(span);
+      } else {
+        fragment.appendChild(document.createTextNode(part));
+      }
+    });
+
+    node.replaceWith(fragment);
   });
 }
 
 function renderMarkdown(markdown, path) {
-  const normalizedMarkdown = markdown.trim().length > 0
+  const normalizedContent = markdown.trim().length > 0
     ? preprocessMarkdown(markdown)
-    : "# Empty note\n\nThis markdown file exists, but it does not contain content yet.";
+    : {
+        markdown: "# Empty note\n\nThis markdown file exists, but it does not contain content yet.",
+        mathBlocks: []
+      };
 
   if (typeof marked?.parse !== "function") {
     noteContent.innerHTML = "";
     const fallback = document.createElement("pre");
-    fallback.textContent = normalizedMarkdown;
+    fallback.textContent = normalizedContent.markdown;
     noteContent.appendChild(fallback);
     noteTitle.textContent = path.split("/").pop();
     noteHeading.textContent = "Markdown preview unavailable";
@@ -190,22 +424,34 @@ function renderMarkdown(markdown, path) {
     return;
   }
 
-  noteContent.innerHTML = marked.parse(normalizedMarkdown, {
+  let renderedHtml = marked.parse(normalizedContent.markdown, {
     gfm: true,
     breaks: false
   });
+
+  normalizedContent.mathBlocks.forEach((content, index) => {
+    const token = `@@MATHBLOCK_${index}@@`;
+    const blockHtml = `<div class="math-block">\\[\n${escapeHtml(content)}\n\\]</div>`;
+    renderedHtml = renderedHtml
+      .replace(`<p>${token}</p>`, blockHtml)
+      .replace(token, blockHtml);
+  });
+
+  noteContent.innerHTML = renderedHtml;
 
   const usedSlugs = new Set();
   const headings = Array.from(noteContent.querySelectorAll("h1, h2, h3, h4, h5, h6"));
   headings.forEach((heading) => {
     heading.id = slugify(heading.textContent, usedSlugs);
+    heading.dataset.headingText = stripHeadingPrefix(heading.textContent.trim());
   });
 
-  const firstHeading = headings[0]?.textContent || path.split("/").pop().replace(".md", "");
+  const firstHeading = headings[0]?.dataset.headingText || path.split("/").pop().replace(".md", "");
   noteTitle.textContent = firstHeading;
   noteHeading.textContent = firstHeading;
   document.title = `${firstHeading} | Note Viewer`;
 
+  applyHeadingNumbering();
   highlightCodeBlocks();
   renderMath();
   buildToc();
@@ -215,14 +461,10 @@ async function loadNote() {
   const params = new URLSearchParams(window.location.search);
   const path = sanitizeNotePath(body.dataset.notePath || params.get("path"));
   notePath.textContent = path;
-
-  if (embeddedMarkdown) {
-    renderMarkdown(embeddedMarkdown.textContent, path);
-    return;
-  }
+  buildNotesNav(path);
 
   try {
-    const response = await fetch(path, { cache: "no-store" });
+    const response = await fetch(resolveMarkdownFetchPath(path), { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Failed to load ${path}`);
     }
@@ -230,6 +472,11 @@ async function loadNote() {
     const rawMarkdown = await response.text();
     renderMarkdown(rawMarkdown, path);
   } catch (error) {
+    if (embeddedMarkdown) {
+      renderMarkdown(embeddedMarkdown.textContent, path);
+      return;
+    }
+
     noteTitle.textContent = "Unable to load note";
     noteHeading.textContent = "Unable to load note";
     const detail = window.location.protocol === "file:"
@@ -245,27 +492,37 @@ themeToggle?.addEventListener("click", () => {
   setTheme(nextTheme);
 });
 
+notesToggle?.addEventListener("click", () => {
+  togglePanel(notesSidebar, notesToggle);
+  togglePanel(tocSidebar, tocToggle, true);
+});
+
 tocToggle?.addEventListener("click", () => {
-  toggleSidebar();
+  togglePanel(tocSidebar, tocToggle);
+  togglePanel(notesSidebar, notesToggle, true);
 });
 
 document.addEventListener("click", (event) => {
-  if (
-    window.innerWidth <= 960 &&
-    noteSidebar.classList.contains("is-open") &&
-    !noteSidebar.contains(event.target) &&
-    !tocToggle.contains(event.target)
-  ) {
-    toggleSidebar(true);
+  if (window.innerWidth > 1100) {
+    return;
+  }
+
+  const clickedNotesToggle = notesToggle?.contains(event.target);
+  const clickedTocToggle = tocToggle?.contains(event.target);
+  const insideNotes = notesSidebar?.contains(event.target);
+  const insideToc = tocSidebar?.contains(event.target);
+
+  if (!clickedNotesToggle && !insideNotes) {
+    togglePanel(notesSidebar, notesToggle, true);
+  }
+
+  if (!clickedTocToggle && !insideToc) {
+    togglePanel(tocSidebar, tocToggle, true);
   }
 });
 
 window.addEventListener("scroll", updateHeaderState, { passive: true });
-window.addEventListener("resize", () => {
-  if (window.innerWidth > 960) {
-    toggleSidebar(true);
-  }
-});
+window.addEventListener("resize", closePanelsOnDesktop);
 
 setTheme(getPreferredTheme());
 updateHeaderState();
