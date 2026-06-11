@@ -115,18 +115,37 @@
 ### B 线：我的复现实现
 
 - [ ] 开始写代码
-- [ ] 自己实现最小版本：
+- [x] 自己实现最小版本：
   - `Observation`
   - `Action`
   - `Env.reset()`
   - `Env.step()`
   - `AgentEnvLoop`
 - [ ] 先不要接模型，哪怕用假数据也行
+- [x] 设计多轮 tool agent 的输出协议：
+  - 中间轮允许分析 + `tool_call`
+  - 最终轮单独输出 `<answer>...</answer>`
+  - 不把 `<answer>` 强行加到每一轮
+  - 明确 tool parser 和 final answer parser 的职责边界
+- [x] 完成本地最小 tool 链路验证：
+  - `process_lc.py -> env_kwargs -> run_tests`
+  - 验证正确代码 / 错误答案 / 语法错误三种分支
+- [x] 完成最小多轮 agent 主体骨架：
+  - `agent_core/types.py`
+  - `agent_core/env.py`
+  - `agent_core/loop.py`
+- [x] 完成最小多轮 loop 调试：
+  - 第 1 轮输出 `tool_call`
+  - 第 2 轮输出 `<answer>`
+- [ ] 补全终局闭环：
+  - 最终轮 `<answer>` 提交后自动评测
+  - 返回最终 reward / done / info
 
 ### 本部分产出
 
-- [ ] 我自己的最小 loop 伪代码
-- [ ] 一个可以跑通 1 个 step 的 toy env
+- [x] 我自己的最小 loop 伪代码
+- [x] 一个可以跑通 1 个 step 的 toy env
+- [x] 一个可以跑通 2-step 的多轮 toy agent
 
 ---
 
@@ -314,6 +333,10 @@
 ## 当前进度
 
 - [x] 建立中文双线学习路线
+- [x] 已明确多轮 tool agent 的第一版终局设计：中间轮做 tool use，最终轮输出 `<answer>`
+- [x] 已完成 LeetCode 的最小数据 / prompt / tool 骨架
+- [x] 已完成 `agent_core` 的最小 env / loop 骨架
+- [ ] 第三部分进行中：主体骨架已搭好，终局评测尚未补全
 - [ ] 第一部分完成
 - [ ] 第二部分完成
 - [ ] 第三部分完成
