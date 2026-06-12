@@ -137,15 +137,25 @@
 - [x] 完成最小多轮 loop 调试：
   - 第 1 轮输出 `tool_call`
   - 第 2 轮输出 `<answer>`
+- [ ] 细化 `env.py` 的职责分层：
+  - 解析层：`tool_call` / `<answer>` 提取
+  - 状态层：`messages` / `finished` / `turn_count` / `last_tool_result`
+  - 转移层：tool 分支 / final answer 分支 / invalid action 分支
 - [ ] 补全终局闭环：
   - 最终轮 `<answer>` 提交后自动评测
   - 返回最终 reward / done / info
+  - 明确中间 step reward 和最终 reward 的关系
+- [ ] 增强环境健壮性：
+  - 空 action 处理
+  - 非法 tool_call 处理
+  - 最大轮数控制
 
 ### 本部分产出
 
 - [x] 我自己的最小 loop 伪代码
 - [x] 一个可以跑通 1 个 step 的 toy env
 - [x] 一个可以跑通 2-step 的多轮 toy agent
+- [ ] 一个带终局评测的完整 toy env
 
 ---
 
@@ -336,7 +346,7 @@
 - [x] 已明确多轮 tool agent 的第一版终局设计：中间轮做 tool use，最终轮输出 `<answer>`
 - [x] 已完成 LeetCode 的最小数据 / prompt / tool 骨架
 - [x] 已完成 `agent_core` 的最小 env / loop 骨架
-- [ ] 第三部分进行中：主体骨架已搭好，终局评测尚未补全
+- [ ] 第三部分进行中：主体骨架已搭好，`env.py` 正在补终局评测与状态分层
 - [ ] 第一部分完成
 - [ ] 第二部分完成
 - [ ] 第三部分完成
