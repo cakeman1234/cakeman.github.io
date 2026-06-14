@@ -137,15 +137,15 @@
 - [x] 完成最小多轮 loop 调试：
   - 第 1 轮输出 `tool_call`
   - 第 2 轮输出 `<answer>`
-- [ ] 细化 `env.py` 的职责分层：
+- [x] 细化 `env.py` 的职责分层：
   - 解析层：`tool_call` / `<answer>` 提取
   - 状态层：`messages` / `finished` / `turn_count` / `last_tool_result`
   - 转移层：tool 分支 / final answer 分支 / invalid action 分支
-- [ ] 补全终局闭环：
+- [x] 补全终局闭环：
   - 最终轮 `<answer>` 提交后自动评测
   - 返回最终 reward / done / info
   - 明确中间 step reward 和最终 reward 的关系
-- [ ] 增强环境健壮性：
+- [x] 增强环境健壮性：
   - 空 action 处理
   - 非法 tool_call 处理
   - 最大轮数控制
@@ -186,7 +186,7 @@
 
 ### 本部分产出
 
-- [ ] 我自己的 trajectory 数据结构
+- [x] 我自己的 trajectory 数据结构
 - [ ] 3-step toy trajectory 示例
 
 ---
@@ -346,7 +346,9 @@
 - [x] 已明确多轮 tool agent 的第一版终局设计：中间轮做 tool use，最终轮输出 `<answer>`
 - [x] 已完成 LeetCode 的最小数据 / prompt / tool 骨架
 - [x] 已完成 `agent_core` 的最小 env / loop 骨架
-- [ ] 第三部分进行中：主体骨架已搭好，`env.py` 正在补终局评测与状态分层
+- [x] 第三部分进行中：主体骨架已搭好，`env.py` 已补上终局评测、非法 action 收口、工具异常处理与最大轮数终止
+- [ ] 第四部分进行中：`types.py` 已有最小 `StepRecord / Trajectory` 结构，`loop.py` 还在和 step 记录联调
+- [ ] 第五部分进行中：`rl_math.py` 即将补齐最小 `return / advantage / GAE` 计算链条
 - [ ] 第一部分完成
 - [ ] 第二部分完成
 - [ ] 第三部分完成
@@ -355,3 +357,126 @@
 - [ ] 第六部分完成
 - [ ] 第七部分完成
 - [ ] 第八部分完成
+
+---
+
+## 给新 Codex 的快速接手区
+
+这一部分是给“新开一个 Codex 对话”准备的。目标是让新的助手不用重新读完整个仓库，也能快速知道项目背景、参考路线、当前进度与下一步。
+
+### 1. 项目一句话
+
+我在做一个 **LeetCode Code Agent 的最小可训练原型**：
+
+- agent 可以多轮调用 tool
+- 中间轮执行 `tool_call`
+- 最终轮输出 `<answer>`
+- 后面要把轨迹、奖励、advantage、训练接口逐步补齐
+
+### 2. 参考项目
+
+我的参考是两条线：
+
+- **架构主线参考 `Agent-R1`**
+  - 重点参考多步 agent-flow、step、trajectory、env-loop 的组织方式
+- **数据与奖励主线参考 `code-r1` / `coder1`**
+  - 重点参考 LeetCode 数据处理
+  - 重点参考判题、reward、return、advantage、GAE 的设计
+
+换句话说：
+
+- `Agent-R1` 主要回答“多轮 agent 框架怎么搭”
+- `code-r1 / coder1` 主要回答“LeetCode 任务怎么做数据、评测与奖励”
+
+### 3. 当前自己项目的目录重点
+
+当前最重要的是我自己项目里的：
+
+- `agent/agent_core/env.py`
+- `agent/agent_core/loop.py`
+- `agent/agent_core/types.py`
+- `agent/agent_core/rl_math.py`
+
+当前参考目录还包括：
+
+- `E:/code/project/Agent-R1`
+- `E:/code/project/agentr1`
+- `E:/code/project/coder1`
+
+### 4. 当前已经完成到哪里
+
+已经完成：
+
+- 最小版多轮 agent 骨架已经有了
+- `env.py` 已经补了终局闭环
+- `env.py` 已经补了非法 action 收口
+- `env.py` 已经补了工具异常处理
+- `types.py` 已经开始承载 `StepRecord / Trajectory`
+
+正在进行：
+
+- `loop.py` 需要把每一步真正写成 step record，并汇总成 trajectory
+- `rl_math.py` 需要补最小 `return / advantage / GAE`
+
+还没进入正式收口：
+
+- 训练入口
+- 更系统的 reward 组织
+- 是否拆出独立 `trainer/`、`reward_loop/` 目录
+
+### 5. 当前最重要的架构约定
+
+当前默认约定是：
+
+- `observation` 是 agent 在某一轮看到的输入
+- `action` 是 agent 在该轮输出的行为
+- 一个 `step` = `(observation, action, reward, next_observation, done, info)`
+- 多个 `step` 串起来形成一个 `trajectory`
+- `trajectory` 是后续 reward / return / advantage / trainer 的输入基础
+
+### 6. 当前建议的新 Codex 工作顺序
+
+如果新 Codex 接手，建议按这个顺序继续：
+
+1. 先检查 `types.py` 和 `loop.py` 是否已经对齐
+2. 把 `loop.py` 补成“每轮都产出完整 `StepRecord`”
+3. 再写 `rl_math.py` 里的最小 `compute_returns`
+4. 再写最小 `compute_advantages`
+5. 最后再补 `compute_gae_advantages`
+
+### 7. 当前最值得优先完成的具体下一步
+
+当前最建议直接继续写的是：
+
+- 让 `loop.py` 输出完整 `Trajectory`
+
+因为只有这一步稳定后，后面的：
+
+- reward 计算
+- return 计算
+- advantage / GAE
+- trainer 输入
+
+才有统一的数据承载结构。
+
+### 8. 如果新 Codex 要先读代码，优先读什么
+
+建议优先阅读顺序：
+
+1. 自己项目
+   - `agent/agent_core/types.py`
+   - `agent/agent_core/env.py`
+   - `agent/agent_core/loop.py`
+   - `agent/agent_core/rl_math.py`
+2. 架构参考
+   - `Agent-R1/agent_r1/agent_flow/agent_flow.py`
+   - `Agent-R1/agent_r1/agent_flow/agent_env_loop.py`
+3. 奖励参考
+   - `Agent-R1/agent_r1/reward_loop/reward_loop.py`
+   - `Agent-R1/agent_r1/trainer/ppo/core_algos.py`
+
+### 9. 可直接复制给新 Codex 的一句话说明
+
+如果我新开一个 Codex 对话，可以直接这样说：
+
+> 我在做一个 LeetCode Code Agent 的最小可训练原型。多轮 agent 架构主要参考 Agent-R1，LeetCode 数据处理、判题与奖励设计主要参考 coder1 / code-r1。当前我自己的 `env.py` 已基本收口，`types.py` 已有最小 `StepRecord / Trajectory`，下一步最优先是把 `loop.py` 补成能稳定产出完整 trajectory，然后继续补 `rl_math.py` 里的 return / advantage / GAE。请先结合 `learn.md` 和 `agent/agent_core` 代码理解当前状态，再继续实现下一步。
