@@ -149,13 +149,21 @@
   - 空 action 处理
   - 非法 tool_call 处理
   - 最大轮数控制
+- [x] 接入本地真实 LeetCode 数据进行多轮联调：
+  - 下载 `newfacade/LeetCodeDataset`
+  - 用第一条真实样本跑通 `debug_agent_loop.py`
+- [x] 新增最小 policy 层骨架：
+  - `agent_core/policy.py`
+  - `BasePolicy`
+  - `DebugRulePolicy`
+- [x] 让 `debug_agent_loop.py` 从“内嵌 fake_policy”切换为“调用 policy 对象”
 
 ### 本部分产出
 
 - [x] 我自己的最小 loop 伪代码
 - [x] 一个可以跑通 1 个 step 的 toy env
 - [x] 一个可以跑通 2-step 的多轮 toy agent
-- [ ] 一个带终局评测的完整 toy env
+- [x] 一个带终局评测的完整 toy env
 
 ---
 
@@ -187,6 +195,7 @@
 ### 本部分产出
 
 - [x] 我自己的 trajectory 数据结构
+- [x] 2-step 真实样本 trajectory 调试结果
 - [ ] 3-step toy trajectory 示例
 
 ---
@@ -218,6 +227,7 @@
 
 ### 本部分产出
 
+- [x] 一篇 `Trajectory / Return / GAE` 学习笔记
 - [ ] 一个手算例子
 - [ ] 一个自己写的 `return/advantage` 实现
 
@@ -346,13 +356,24 @@
 - [x] 已明确多轮 tool agent 的第一版终局设计：中间轮做 tool use，最终轮输出 `<answer>`
 - [x] 已完成 LeetCode 的最小数据 / prompt / tool 骨架
 - [x] 已完成 `agent_core` 的最小 env / loop 骨架
-- [x] 第三部分进行中：主体骨架已搭好，`env.py` 已补上终局评测、非法 action 收口、工具异常处理与最大轮数终止
-- [ ] 第四部分进行中：`types.py` 已有最小 `StepRecord / Trajectory` 结构，`loop.py` 还在和 step 记录联调
-- [ ] 第五部分进行中：`rl_math.py` 即将补齐最小 `return / advantage / GAE` 计算链条
+- [x] 已完成真实数据下载与本地数据入口兼容：
+  - `newfacade/LeetCodeDataset`
+  - `LeetCodeDataset-train.jsonl`
+  - `LeetCodeDataset-test.jsonl`
+- [x] 已完成 `uv` 虚拟环境建立与 `datasets` 安装
+- [x] 第三部分基本完成：主体骨架已搭好，`env.py` 已补上终局评测、非法 action 收口、工具异常处理与最大轮数终止
+- [x] 第四部分基本完成：`types.py` 已有最小 `StepRecord / Trajectory` 结构，`loop.py` 已能稳定产出完整 trajectory
+- [x] 已新增最小 `policy` 层骨架：`agent_core/policy.py`
+- [x] 已完成 `debug_agent_loop.py` 的真实样本联调：
+  - 第 0 步错误代码 `reward = 0`
+  - 第 1 步修正代码 `reward = 1`
+  - 总 reward = 1
+- [ ] 当前新的进行中重点：`policy.py` 还只是规则版，尚未真正根据 `obs.messages` 中的 tool feedback 做决策
+- [ ] 第五部分进行中：`rl_math.py` 已有最小函数骨架，但还没有和真实 trajectory 做系统联调
 - [ ] 第一部分完成
 - [ ] 第二部分完成
-- [ ] 第三部分完成
-- [ ] 第四部分完成
+- [x] 第三部分完成
+- [x] 第四部分完成
 - [ ] 第五部分完成
 - [ ] 第六部分完成
 - [ ] 第七部分完成
@@ -412,10 +433,14 @@
 - `env.py` 已经补了非法 action 收口
 - `env.py` 已经补了工具异常处理
 - `types.py` 已经开始承载 `StepRecord / Trajectory`
+- `loop.py` 已经能稳定返回完整 `Trajectory`
+- 本地 LeetCode 真实数据已经下载
+- `debug_agent_loop.py` 已经能跑真实样本
+- `agent_core/policy.py` 已经有最小 `BasePolicy / DebugRulePolicy`
 
 正在进行：
 
-- `loop.py` 需要把每一步真正写成 step record，并汇总成 trajectory
+- `policy.py` 需要从“按 step_idx 输出”推进到“读取 obs/messages 决策”
 - `rl_math.py` 需要补最小 `return / advantage / GAE`
 
 还没进入正式收口：
@@ -438,21 +463,23 @@
 
 如果新 Codex 接手，建议按这个顺序继续：
 
-1. 先检查 `types.py` 和 `loop.py` 是否已经对齐
-2. 把 `loop.py` 补成“每轮都产出完整 `StepRecord`”
-3. 再写 `rl_math.py` 里的最小 `compute_returns`
-4. 再写最小 `compute_advantages`
-5. 最后再补 `compute_gae_advantages`
+1. 先检查 `policy.py` 是否已经开始读取 `obs.messages`
+2. 把 `DebugRulePolicy` 从“按 step_idx 输出”改成“根据 tool feedback 决策”
+3. 再把 `rl_math.py` 和真实 trajectory 接起来
+4. 再写最小 `compute_returns`
+5. 再写最小 `compute_advantages`
+6. 最后再补 `compute_gae_advantages`
 
 ### 7. 当前最值得优先完成的具体下一步
 
 当前最建议直接继续写的是：
 
-- 让 `loop.py` 输出完整 `Trajectory`
+- 让 `policy.py` 真正利用 `obs.messages` 中的 tool feedback 决定下一轮 action
 
 因为只有这一步稳定后，后面的：
 
-- reward 计算
+- 多轮 decision
+- 更真实的 trajectory
 - return 计算
 - advantage / GAE
 - trainer 输入
@@ -467,6 +494,7 @@
    - `agent/agent_core/types.py`
    - `agent/agent_core/env.py`
    - `agent/agent_core/loop.py`
+   - `agent/agent_core/policy.py`
    - `agent/agent_core/rl_math.py`
 2. 架构参考
    - `Agent-R1/agent_r1/agent_flow/agent_flow.py`
@@ -480,3 +508,5 @@
 如果我新开一个 Codex 对话，可以直接这样说：
 
 > 我在做一个 LeetCode Code Agent 的最小可训练原型。多轮 agent 架构主要参考 Agent-R1，LeetCode 数据处理、判题与奖励设计主要参考 coder1 / code-r1。当前我自己的 `env.py` 已基本收口，`types.py` 已有最小 `StepRecord / Trajectory`，下一步最优先是把 `loop.py` 补成能稳定产出完整 trajectory，然后继续补 `rl_math.py` 里的 return / advantage / GAE。请先结合 `learn.md` 和 `agent/agent_core` 代码理解当前状态，再继续实现下一步。
+
+> 我在做一个 LeetCode Code Agent 的最小可训练原型。多轮 agent 架构主要参考 Agent-R1，LeetCode 数据处理、判题与奖励设计主要参考 coder1 / code-r1。当前我自己的 `env.py`、`loop.py`、`types.py` 已能稳定跑通真实样本，`debug_agent_loop.py` 已通过 `policy.py` 接入最小规则策略，下一步最优先是让 `policy.py` 真正读取 `obs.messages` 中的 tool feedback 决定下一轮 action，然后再继续补 `rl_math.py` 与真实 trajectory 的联调。请先结合 `learn.md` 和 `agent/agent_core` 代码理解当前状态，再继续实现下一步。
